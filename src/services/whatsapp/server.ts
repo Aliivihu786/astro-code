@@ -101,7 +101,7 @@ export function getWhatsAppConnectUrl(): string {
   const message = encodeURIComponent(
     process.env.ASTRO_WHATSAPP_MESSAGE?.trim() ||
       process.env.ASTRO_WHATSAPP_JOIN_CODE?.trim() ||
-      'connect astro code whatsapp agent',
+      '/connect',
   )
 
   if (phoneNumber) return `https://wa.me/${phoneNumber}?text=${message}`
@@ -151,6 +151,11 @@ async function handleRequest(
       return
     }
 
+    if (isConnectCommand(prompt)) {
+      sendTwiml(res, formatConnectReply(session))
+      return
+    }
+
     const reply = shouldUseRemoteMode() && !prompt.startsWith('/')
       ? await sendToAstroRemoteSession(prompt, session)
       : prompt.startsWith('/')
@@ -161,6 +166,26 @@ async function handleRequest(
     const message = error instanceof Error ? error.message : String(error)
     sendTwiml(res, `Astro Code error: ${message}`)
   }
+}
+
+function isConnectCommand(prompt: string): boolean {
+  const normalized = prompt.trim().toLowerCase()
+  return (
+    normalized === '/connect' ||
+    normalized === 'connect' ||
+    normalized === 'start' ||
+    normalized === '/start'
+  )
+}
+
+function formatConnectReply(session: WhatsAppChatSession): string {
+  return [
+    'Astro Code connected.',
+    `Session: ${session.id}`,
+    `CLI session: ${serverInfo?.cliSessionId || activeCliSessionId}`,
+    'Send any message here to continue this Astro CLI conversation.',
+    'Use /status for session info or /reset to clear WhatsApp memory.',
+  ].join('\n')
 }
 
 export function resolveWhatsAppRemoteReplies(messages: unknown[]): void {
