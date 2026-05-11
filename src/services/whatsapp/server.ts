@@ -1,5 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
-import { loadProviderConfig } from '../../utils/providerSetup.js'
+import {
+  formatProviderModelChoices,
+  getAvailableProviderModels,
+  getProviderModels,
+  loadProviderConfig,
+  setProviderModel,
+  type ProviderId,
+} from '../../utils/providerSetup.js'
 
 type WhatsAppServerInfo = {
   port: number
@@ -103,12 +110,88 @@ async function handleRequest(
       return
     }
 
-    const reply = await askProvider(prompt)
+    const reply = prompt.startsWith('/')
+      ? await handleSlashCommand(prompt)
+      : await askProvider(prompt)
     sendTwiml(res, reply)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     sendTwiml(res, `Astro Code error: ${message}`)
   }
+}
+
+async function handleSlashCommand(input: string): Promise<string> {
+  const [command = '', ...rest] = input.trim().split(/\s+/)
+  const args = rest.join(' ').trim()
+
+  switch (command.toLowerCase()) {
+    case '/help':
+      return [
+        'Astro Code WhatsApp commands:',
+        '/model - show current provider models',
+        '/model list - list provider models',
+        '/model <model> - switch model',
+        '/model custom <model> - switch to custom model id',
+        '/status - show WhatsApp bridge status',
+        '',
+        'Terminal UI commands still run inside Astro Code terminal.',
+      ].join('\n')
+    case '/model':
+      return handleModelCommand(args)
+    case '/status':
+      return handleStatusCommand()
+    default:
+      return [
+        `${command} is a terminal-only Astro Code command from WhatsApp.`,
+        'Supported WhatsApp commands: /help, /model, /status.',
+        'Send normal text to chat with the agent.',
+      ].join('\n')
+  }
+}
+
+async function handleModelCommand(args: string): Promise<string> {
+  if (!args || args === 'list' || args === 'status' || args === 'current') {
+    return formatProviderModelChoices()
+  }
+
+  const config = await loadProviderConfig()
+  const provider = (config?.provider || process.env.AGENT_PROVIDER) as
+    | ProviderId
+    | undefined
+  const providerModels = await getAvailableProviderModels()
+  const staticProviderModels = getProviderModels(provider)
+  const requested = args.toLowerCase()
+  const model = requested.startsWith('custom ')
+    ? args.slice('custom '.length).trim()
+    : args.trim()
+
+  if (!model) return 'Model is required.'
+
+  if (
+    providerModels.includes(model) ||
+    requested.startsWith('custom ') ||
+    staticProviderModels.length === 0
+  ) {
+    const nextModel = await setProviderModel(model)
+    return `Model changed to ${nextModel}`
+  }
+
+  return `Unknown model '${args}'.\n\n${await formatProviderModelChoices()}`
+}
+
+async function handleStatusCommand(): Promise<string> {
+  const config = await loadProviderConfig()
+  const providerName =
+    config?.providerName || process.env.AGENT_PROVIDER_NAME || 'Provider'
+  const model = config?.model || process.env.AGENT_MODEL || process.env.ANTHROPIC_MODEL
+  const webhook = serverInfo?.publicWebhookUrl || serverInfo?.webhookUrl || 'not running'
+
+  return [
+    'Astro Code WhatsApp bridge',
+    `Provider: ${providerName}`,
+    `Model: ${model || 'not configured'}`,
+    `Webhook: ${webhook}`,
+  ].join('\n')
 }
 
 async function askProvider(prompt: string): Promise<string> {
