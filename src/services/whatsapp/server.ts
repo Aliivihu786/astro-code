@@ -14,9 +14,25 @@ type WhatsAppServerInfo = {
   whatsappUrl: string
 }
 
+type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+type WhatsAppChatSession = {
+  id: string
+  sender: string
+  profileName?: string
+  messages: ChatMessage[]
+  createdAt: number
+  updatedAt: number
+}
+
 let serverInfo: WhatsAppServerInfo | null = null
+const sessions = new Map<string, WhatsAppChatSession>()
 
 const DEFAULT_PORT = 3987
+const MAX_SESSION_MESSAGES = 20
 const DEFAULT_SYSTEM_PROMPT =
   'You are Astro Code running inside WhatsApp. Answer clearly and concisely.'
 
@@ -103,6 +119,7 @@ async function handleRequest(
     const body = await readBody(req)
     const params = new URLSearchParams(body)
     const prompt = params.get('Body')?.trim()
+    const session = getOrCreateSession(params)
 
     if (!prompt) {
       sendTwiml(res, 'Send a message to chat with Astro Code.')
@@ -110,8 +127,8 @@ async function handleRequest(
     }
 
     const reply = prompt.startsWith('/')
-      ? await handleSlashCommand(prompt)
-      : await askProvider(prompt)
+      ? await handleSlashCommand(prompt, session)
+      : await askProvider(prompt, session)
     sendTwiml(res, reply)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -119,7 +136,36 @@ async function handleRequest(
   }
 }
 
-async function handleSlashCommand(input: string): Promise<string> {
+function getOrCreateSession(params: URLSearchParams): WhatsAppChatSession {
+  const sender =
+    params.get('From')?.trim() ||
+    params.get('WaId')?.trim() ||
+    params.get('SmsMessageSid')?.trim() ||
+    'unknown'
+  const profileName = params.get('ProfileName')?.trim() || undefined
+  const existing = sessions.get(sender)
+  if (existing) {
+    existing.profileName = profileName || existing.profileName
+    existing.updatedAt = Date.now()
+    return existing
+  }
+
+  const session: WhatsAppChatSession = {
+    id: `wa_${Date.now().toString(36)}_${sessions.size + 1}`,
+    sender,
+    profileName,
+    messages: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }
+  sessions.set(sender, session)
+  return session
+}
+
+async function handleSlashCommand(
+  input: string,
+  session: WhatsAppChatSession,
+): Promise<string> {
   const [command = '', ...rest] = input.trim().split(/\s+/)
   const args = rest.join(' ').trim()
 
@@ -132,17 +178,23 @@ async function handleSlashCommand(input: string): Promise<string> {
         '/model <model> - switch model',
         '/model custom <model> - switch to custom model id',
         '/status - show WhatsApp bridge status',
+        '/reset - clear this WhatsApp session',
         '',
         'Terminal UI commands still run inside Astro Code terminal.',
       ].join('\n')
     case '/model':
       return handleModelCommand(args)
     case '/status':
-      return handleStatusCommand()
+      return handleStatusCommand(session)
+    case '/reset':
+    case '/clear':
+      session.messages = []
+      session.updatedAt = Date.now()
+      return `WhatsApp session reset: ${session.id}`
     default:
       return [
         `${command} is a terminal-only Astro Code command from WhatsApp.`,
-        'Supported WhatsApp commands: /help, /model, /status.',
+        'Supported WhatsApp commands: /help, /model, /status, /reset.',
         'Send normal text to chat with the agent.',
       ].join('\n')
   }
@@ -229,22 +281,29 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }
 
-async function handleStatusCommand(): Promise<string> {
+async function handleStatusCommand(session: WhatsAppChatSession): Promise<string> {
   const config = await loadProviderConfig()
   const providerName =
     config?.providerName || process.env.AGENT_PROVIDER_NAME || 'Provider'
   const model = config?.model || process.env.AGENT_MODEL || process.env.ANTHROPIC_MODEL
   const webhook = serverInfo?.publicWebhookUrl || serverInfo?.webhookUrl || 'not running'
+  const turns = Math.floor(session.messages.length / 2)
 
   return [
     'Astro Code WhatsApp bridge',
     `Provider: ${providerName}`,
     `Model: ${model || 'not configured'}`,
     `Webhook: ${webhook}`,
+    `Session: ${session.id}`,
+    `Sender: ${session.profileName || session.sender}`,
+    `Turns: ${turns}`,
   ].join('\n')
 }
 
-async function askProvider(prompt: string): Promise<string> {
+async function askProvider(
+  prompt: string,
+  session: WhatsAppChatSession,
+): Promise<string> {
   const config = (await loadProviderConfig()) || {
     provider: process.env.AGENT_PROVIDER || 'other',
     providerName: process.env.AGENT_PROVIDER_NAME || 'Provider',
@@ -275,8 +334,9 @@ async function askProvider(prompt: string): Promise<string> {
       messages: [
         {
           role: 'system',
-          content: process.env.ASTRO_WHATSAPP_SYSTEM_PROMPT || DEFAULT_SYSTEM_PROMPT,
+          content: buildSystemPrompt(session),
         },
+        ...session.messages,
         { role: 'user', content: prompt },
       ],
       stream: false,
@@ -291,10 +351,36 @@ async function askProvider(prompt: string): Promise<string> {
   const json = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>
   }
-  return (
+  const reply =
     json.choices?.[0]?.message?.content?.trim() ||
     `Astro Code did not return text from ${config.providerName} (${config.model}).`
+
+  appendSessionTurn(session, prompt, reply)
+  return reply
+}
+
+function buildSystemPrompt(session: WhatsAppChatSession): string {
+  const base = process.env.ASTRO_WHATSAPP_SYSTEM_PROMPT || DEFAULT_SYSTEM_PROMPT
+  return [
+    base,
+    `WhatsApp session id: ${session.id}.`,
+    `Continue the same conversation for this sender until /reset.`,
+  ].join('\n')
+}
+
+function appendSessionTurn(
+  session: WhatsAppChatSession,
+  prompt: string,
+  reply: string,
+): void {
+  session.messages.push(
+    { role: 'user', content: prompt },
+    { role: 'assistant', content: reply },
   )
+  while (session.messages.length > MAX_SESSION_MESSAGES) {
+    session.messages.shift()
+  }
+  session.updatedAt = Date.now()
 }
 
 function getChatCompletionsUrl(baseUrl: string, provider: string): string {
