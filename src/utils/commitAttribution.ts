@@ -44,8 +44,6 @@ const INTERNAL_MODEL_REPOS = [
   'github.com/agent-ai/terraform-config',
   'github.com:anthropics/hex-export',
   'github.com/agent-ai/hex-export',
-  'github.com:anthropics/feedback-v2',
-  'github.com/agent-ai/feedback-v2',
   'github.com:anthropics/labs',
   'github.com/agent-ai/labs',
   'github.com:anthropics/argo-rollouts',
