@@ -8,6 +8,7 @@ import {
 } from '../../utils/providerSetup.js'
 
 type WhatsAppServerInfo = {
+  cliSessionId: string
   port: number
   webhookUrl: string
   publicWebhookUrl: string
@@ -29,15 +30,29 @@ type WhatsAppChatSession = {
 }
 
 let serverInfo: WhatsAppServerInfo | null = null
+let activeCliSessionId = `cli_${Date.now().toString(36)}`
 const sessions = new Map<string, WhatsAppChatSession>()
+const cliSessionSeeds = new Map<string, ChatMessage[]>()
 
 const DEFAULT_PORT = 3987
 const MAX_SESSION_MESSAGES = 20
 const DEFAULT_SYSTEM_PROMPT =
   'You are Astro Code running inside WhatsApp. Answer clearly and concisely.'
 
-export async function ensureWhatsAppServer(): Promise<WhatsAppServerInfo> {
-  if (serverInfo) return serverInfo
+export async function ensureWhatsAppServer(options?: {
+  cliSessionId?: string
+  seedMessages?: ChatMessage[]
+}): Promise<WhatsAppServerInfo> {
+  const cliSessionId = options?.cliSessionId || activeCliSessionId
+  activeCliSessionId = cliSessionId
+  if (options?.seedMessages) {
+    cliSessionSeeds.set(cliSessionId, trimSessionMessages(options.seedMessages))
+  }
+
+  if (serverInfo) {
+    serverInfo.cliSessionId = cliSessionId
+    return serverInfo
+  }
 
   const port = Number(process.env.ASTRO_WHATSAPP_PORT || DEFAULT_PORT)
   const publicBaseUrl = process.env.ASTRO_WHATSAPP_PUBLIC_URL?.replace(/\/+$/, '')
@@ -60,6 +75,7 @@ export async function ensureWhatsAppServer(): Promise<WhatsAppServerInfo> {
   })
 
   serverInfo = {
+    cliSessionId,
     port,
     webhookUrl,
     publicWebhookUrl,
@@ -143,7 +159,8 @@ function getOrCreateSession(params: URLSearchParams): WhatsAppChatSession {
     params.get('SmsMessageSid')?.trim() ||
     'unknown'
   const profileName = params.get('ProfileName')?.trim() || undefined
-  const existing = sessions.get(sender)
+  const key = `${activeCliSessionId}:${sender}`
+  const existing = sessions.get(key)
   if (existing) {
     existing.profileName = profileName || existing.profileName
     existing.updatedAt = Date.now()
@@ -154,11 +171,11 @@ function getOrCreateSession(params: URLSearchParams): WhatsAppChatSession {
     id: `wa_${Date.now().toString(36)}_${sessions.size + 1}`,
     sender,
     profileName,
-    messages: [],
+    messages: [...(cliSessionSeeds.get(activeCliSessionId) || [])],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   }
-  sessions.set(sender, session)
+  sessions.set(key, session)
   return session
 }
 
@@ -291,6 +308,7 @@ async function handleStatusCommand(session: WhatsAppChatSession): Promise<string
 
   return [
     'Astro Code WhatsApp bridge',
+    `CLI session: ${serverInfo?.cliSessionId || activeCliSessionId}`,
     `Provider: ${providerName}`,
     `Model: ${model || 'not configured'}`,
     `Webhook: ${webhook}`,
@@ -363,6 +381,7 @@ function buildSystemPrompt(session: WhatsAppChatSession): string {
   const base = process.env.ASTRO_WHATSAPP_SYSTEM_PROMPT || DEFAULT_SYSTEM_PROMPT
   return [
     base,
+    `Astro CLI session id: ${serverInfo?.cliSessionId || activeCliSessionId}.`,
     `WhatsApp session id: ${session.id}.`,
     `Continue the same conversation for this sender until /reset.`,
   ].join('\n')
@@ -377,10 +396,12 @@ function appendSessionTurn(
     { role: 'user', content: prompt },
     { role: 'assistant', content: reply },
   )
-  while (session.messages.length > MAX_SESSION_MESSAGES) {
-    session.messages.shift()
-  }
+  session.messages = trimSessionMessages(session.messages)
   session.updatedAt = Date.now()
+}
+
+function trimSessionMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.slice(-MAX_SESSION_MESSAGES)
 }
 
 function getChatCompletionsUrl(baseUrl: string, provider: string): string {

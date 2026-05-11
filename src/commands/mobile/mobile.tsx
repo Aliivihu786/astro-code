@@ -1,18 +1,24 @@
 import { toString as qrToString } from 'qrcode'
 import * as React from 'react'
 import { useCallback, useEffect, useState } from 'react'
+import { getSessionId } from '../../bootstrap/state.js'
 import { Pane } from '../../components/design-system/Pane.js'
 import type { KeyboardEvent } from '../../ink/events/keyboard-event.js'
 import { Box, Text } from '../../ink.js'
 import { useKeybinding } from '../../keybindings/useKeybinding.js'
 import { ensureWhatsAppServer } from '../../services/whatsapp/server.js'
-import type { LocalJSXCommandOnDone } from '../../types/command.js'
+import type {
+  LocalJSXCommandContext,
+  LocalJSXCommandOnDone,
+} from '../../types/command.js'
+import { getContentText } from '../../utils/messages.js'
 
 type Props = {
+  context: LocalJSXCommandContext
   onDone: () => void
 }
 
-function MobileQRCode({ onDone }: Props): React.ReactNode {
+function MobileQRCode({ context, onDone }: Props): React.ReactNode {
   const [qrCode, setQrCode] = useState('')
   const [status, setStatus] = useState('Starting WhatsApp webhook...')
   const [webhookUrl, setWebhookUrl] = useState('')
@@ -21,7 +27,10 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
 
   useEffect(() => {
     async function startWhatsApp(): Promise<void> {
-      const info = await ensureWhatsAppServer()
+      const info = await ensureWhatsAppServer({
+        cliSessionId: getSessionId(),
+        seedMessages: getSeedMessages(context),
+      })
       const qr = await qrToString(info.whatsappUrl, {
         type: 'utf8',
         errorCorrectionLevel: 'M',
@@ -40,7 +49,7 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
       setQrCode('')
       setStatus(`WhatsApp setup failed: ${message}`)
     })
-  }, [])
+  }, [context])
 
   const handleClose = useCallback(() => {
     onDone()
@@ -101,6 +110,31 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
 
 export async function call(
   onDone: LocalJSXCommandOnDone,
+  context: LocalJSXCommandContext,
 ): Promise<React.ReactNode> {
-  return <MobileQRCode onDone={onDone} />
+  return <MobileQRCode context={context} onDone={onDone} />
+}
+
+function getSeedMessages(context: LocalJSXCommandContext): Array<{
+  role: 'user' | 'assistant'
+  content: string
+}> {
+  return (context.messages || [])
+    .map(message => {
+      const role = message?.message?.role
+      if (role !== 'user' && role !== 'assistant') return null
+      if (message.isMeta || message.isCompactSummary || message.isVirtual) return null
+      const content = getContentText(message.message.content)?.trim()
+      if (!content) return null
+      return { role, content }
+    })
+    .filter(
+      (
+        message,
+      ): message is {
+        role: 'user' | 'assistant'
+        content: string
+      } => message !== null,
+    )
+    .slice(-20)
 }
