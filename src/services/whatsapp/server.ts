@@ -6,6 +6,8 @@ import {
   type AgentProviderConfig,
   type ProviderId,
 } from '../../utils/providerSetup.js'
+import { enqueue } from '../../utils/messageQueueManager.js'
+import { getContentText } from '../../utils/messages.js'
 
 type WhatsAppServerInfo = {
   cliSessionId: string
@@ -29,10 +31,17 @@ type WhatsAppChatSession = {
   updatedAt: number
 }
 
+type PendingRemoteReply = {
+  resolve: (value: string) => void
+  sessionKey: string
+  startedAt: number
+}
+
 let serverInfo: WhatsAppServerInfo | null = null
 let activeCliSessionId = `cli_${Date.now().toString(36)}`
 const sessions = new Map<string, WhatsAppChatSession>()
 const cliSessionSeeds = new Map<string, ChatMessage[]>()
+const pendingRemoteReplies: PendingRemoteReply[] = []
 
 const DEFAULT_PORT = 3987
 const MAX_SESSION_MESSAGES = 20
@@ -142,7 +151,9 @@ async function handleRequest(
       return
     }
 
-    const reply = prompt.startsWith('/')
+    const reply = shouldUseRemoteMode() && !prompt.startsWith('/')
+      ? await sendToAstroRemoteSession(prompt, session)
+      : prompt.startsWith('/')
       ? await handleSlashCommand(prompt, session)
       : await askProvider(prompt, session)
     sendTwiml(res, reply)
@@ -150,6 +161,83 @@ async function handleRequest(
     const message = error instanceof Error ? error.message : String(error)
     sendTwiml(res, `Astro Code error: ${message}`)
   }
+}
+
+export function resolveWhatsAppRemoteReplies(messages: unknown[]): void {
+  if (pendingRemoteReplies.length === 0) return
+
+  const reply = findLastAssistantText(messages)
+  if (!reply) return
+
+  const pending = pendingRemoteReplies.shift()
+  pending?.resolve(reply)
+}
+
+function findLastAssistantText(messages: unknown[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as {
+      message?: { role?: string; content?: unknown }
+      isMeta?: boolean
+    }
+    if (message?.isMeta || message?.message?.role !== 'assistant') continue
+    const text = getContentText(
+      message.message.content as Parameters<typeof getContentText>[0],
+    )?.trim()
+    if (text) return text
+  }
+  return null
+}
+
+function shouldUseRemoteMode(): boolean {
+  return process.env.ASTRO_WHATSAPP_MODE !== 'provider'
+}
+
+async function sendToAstroRemoteSession(
+  prompt: string,
+  session: WhatsAppChatSession,
+): Promise<string> {
+  const sessionKey = `${activeCliSessionId}:${session.sender}`
+  enqueue({
+    value: prompt,
+    mode: 'prompt',
+    bridgeOrigin: true,
+    skipSlashCommands: true,
+    priority: 'next',
+  })
+
+  const reply = await waitForRemoteReply(sessionKey, 14_000)
+  if (reply) {
+    appendSessionTurn(session, prompt, reply)
+    return reply
+  }
+
+  return [
+    'Sent to Astro CLI session.',
+    'Astro is still working or no response was captured before WhatsApp timeout.',
+    'Check terminal for final output.',
+  ].join('\n')
+}
+
+function waitForRemoteReply(
+  sessionKey: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  return new Promise(resolve => {
+    const pending: PendingRemoteReply = {
+      sessionKey,
+      startedAt: Date.now(),
+      resolve: value => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+    }
+    const timer = setTimeout(() => {
+      const index = pendingRemoteReplies.indexOf(pending)
+      if (index >= 0) pendingRemoteReplies.splice(index, 1)
+      resolve(null)
+    }, timeoutMs)
+    pendingRemoteReplies.push(pending)
+  })
 }
 
 function getOrCreateSession(params: URLSearchParams): WhatsAppChatSession {
