@@ -43,6 +43,10 @@ type ToolBlockState = {
   started: boolean
 }
 
+type MessageConversionOptions = {
+  flattenToolHistory: boolean
+}
+
 export function shouldUseOpenAICompatibleFetch(): boolean {
   return process.env.AGENT_PROVIDER_API === 'openai-compatible'
 }
@@ -193,9 +197,12 @@ function buildAnthropicResponseHeaders(
 }
 
 function toOpenAIChatRequest(body: AnthropicMessageRequest): Record<string, unknown> {
+  const conversionOptions: MessageConversionOptions = {
+    flattenToolHistory: shouldFlattenToolHistory(),
+  }
   const request: Record<string, unknown> = {
     model: body.model || process.env.AGENT_MODEL,
-    messages: toOpenAIMessages(body),
+    messages: toOpenAIMessages(body, conversionOptions),
     stream: Boolean(body.stream),
   }
 
@@ -230,7 +237,17 @@ function toOpenAIChatRequest(body: AnthropicMessageRequest): Record<string, unkn
   return request
 }
 
-function toOpenAIMessages(body: AnthropicMessageRequest): Array<Record<string, unknown>> {
+function shouldFlattenToolHistory(): boolean {
+  // Gemini's OpenAI-compatible endpoint rejects replayed function-call parts
+  // unless they include Google's private thought_signature metadata. Preserve
+  // the tool context as plain transcript text instead.
+  return process.env.AGENT_PROVIDER === 'google'
+}
+
+function toOpenAIMessages(
+  body: AnthropicMessageRequest,
+  options: MessageConversionOptions,
+): Array<Record<string, unknown>> {
   const messages: Array<Record<string, unknown>> = []
   const systemText = flattenContent(body.system)
   if (systemText) {
@@ -239,7 +256,7 @@ function toOpenAIMessages(body: AnthropicMessageRequest): Array<Record<string, u
 
   for (const message of body.messages || []) {
     if (message.role === 'assistant') {
-      messages.push(toOpenAIAssistantMessage(message.content))
+      messages.push(toOpenAIAssistantMessage(message.content, options))
       continue
     }
 
@@ -253,6 +270,16 @@ function toOpenAIMessages(body: AnthropicMessageRequest): Array<Record<string, u
     for (const block of blocks) {
       if (!isRecord(block)) continue
       if (block.type === 'tool_result') {
+        if (options.flattenToolHistory) {
+          const resultText = flattenContent(block.content)
+          userTextBlocks.push(
+            [
+              `[tool result: ${String(block.tool_use_id || 'unknown')}]`,
+              resultText || '(empty result)',
+            ].join('\n'),
+          )
+          continue
+        }
         messages.push({
           role: 'tool',
           tool_call_id: String(block.tool_use_id || ''),
@@ -271,7 +298,10 @@ function toOpenAIMessages(body: AnthropicMessageRequest): Array<Record<string, u
   return messages
 }
 
-function toOpenAIAssistantMessage(content: unknown): Record<string, unknown> {
+function toOpenAIAssistantMessage(
+  content: unknown,
+  options: MessageConversionOptions,
+): Record<string, unknown> {
   const blocks = Array.isArray(content) ? content : null
   if (!blocks) {
     return { role: 'assistant', content: flattenContent(content) }
@@ -282,6 +312,15 @@ function toOpenAIAssistantMessage(content: unknown): Record<string, unknown> {
   for (const block of blocks) {
     if (!isRecord(block)) continue
     if (block.type === 'tool_use') {
+      if (options.flattenToolHistory) {
+        text.push(
+          [
+            `[tool call: ${String(block.name || 'tool')}]`,
+            JSON.stringify(block.input || {}),
+          ].join('\n'),
+        )
+        continue
+      }
       toolCalls.push({
         id: String(block.id || randomUUID()),
         type: 'function',
