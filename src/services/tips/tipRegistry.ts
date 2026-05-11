@@ -464,13 +464,6 @@ const externalTips: Tip[] = [
     isRelevant: async () => true,
   },
   {
-    id: 'mobile-app',
-    content: async () =>
-      '/mobile to connect Astro Code to WhatsApp from your phone',
-    cooldownSessions: 15,
-    isRelevant: async () => true,
-  },
-  {
     id: 'opusplan-mode-reminder',
     content: async () =>
       `Your default model setting is Opus Plan Mode. Press ${getShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab')} twice to activate Plan Mode and plan with Astro Opus.`,

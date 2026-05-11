@@ -130,7 +130,6 @@ import { escapeXml } from '../utils/xml.js';
 import type { ThinkingConfig } from '../utils/thinking.js';
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
 import { handlePromptSubmit, type PromptInputHelpers } from '../utils/handlePromptSubmit.js';
-import { resolveWhatsAppRemoteReplies } from '../services/whatsapp/server.js';
 import { useQueueProcessor } from '../hooks/useQueueProcessor.js';
 import { useMailboxBridge } from '../hooks/useMailboxBridge.js';
 import { queryCheckpoint, logQueryProfileReport } from '../utils/queryProfiler.js';
@@ -2873,8 +2872,6 @@ export function REPL({
         // onQueryImpl only on successful completion.
         resetLoadingState();
         await mrOnTurnComplete(messagesRef.current, abortController.signal.aborted);
-        resolveWhatsAppRemoteReplies(messagesRef.current);
-
         // Notify bridge clients that the turn is complete so mobile apps
         // can stop the spark animation and show post-turn UI.
         sendBridgeResultRef.current();
