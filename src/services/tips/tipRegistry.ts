@@ -466,7 +466,7 @@ const externalTips: Tip[] = [
   {
     id: 'mobile-app',
     content: async () =>
-      '/mobile to use Astro Code from the Astro app on your phone',
+      '/mobile to connect Astro Code to WhatsApp from your phone',
     cooldownSessions: 15,
     isRelevant: async () => true,
   },

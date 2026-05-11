@@ -4,7 +4,7 @@ const mobile = {
   type: 'local-jsx',
   name: 'mobile',
   aliases: ['ios', 'android'],
-  description: 'Show QR code to download the Astro mobile app',
+  description: 'Connect Astro Code to WhatsApp',
   load: () => import('./mobile.js'),
 } satisfies Command
 
