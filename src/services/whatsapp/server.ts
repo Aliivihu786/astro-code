@@ -104,8 +104,10 @@ export function getWhatsAppConnectUrl(): string {
       '/connect',
   )
 
-  if (phoneNumber) return `https://wa.me/${phoneNumber}?text=${message}`
-  return `https://wa.me/?text=${message}`
+  if (phoneNumber) {
+    return `https://api.whatsapp.com/send?phone=${phoneNumber}&text=${message}`
+  }
+  return `https://api.whatsapp.com/send?text=${message}`
 }
 
 function normalizeWhatsAppUrl(value: string | undefined): string | null {
@@ -113,11 +115,15 @@ function normalizeWhatsAppUrl(value: string | undefined): string | null {
   if (!raw) return null
   if (raw.startsWith('whatsapp:')) {
     const phoneNumber = normalizeWhatsAppPhone(raw)
-    return phoneNumber ? `https://wa.me/${phoneNumber}` : null
+    return phoneNumber
+      ? `https://api.whatsapp.com/send?phone=${phoneNumber}`
+      : null
   }
   if (/^\+?\d[\d\s().-]+$/.test(raw)) {
     const phoneNumber = normalizeWhatsAppPhone(raw)
-    return phoneNumber ? `https://wa.me/${phoneNumber}` : null
+    return phoneNumber
+      ? `https://api.whatsapp.com/send?phone=${phoneNumber}`
+      : null
   }
   return raw
 }
