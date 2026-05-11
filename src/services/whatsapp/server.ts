@@ -47,17 +47,36 @@ export async function ensureWhatsAppServer(): Promise<WhatsAppServerInfo> {
 }
 
 export function getWhatsAppConnectUrl(): string {
-  const configuredUrl = process.env.ASTRO_WHATSAPP_URL?.trim()
+  const configuredUrl = normalizeWhatsAppUrl(process.env.ASTRO_WHATSAPP_URL)
   if (configuredUrl) return configuredUrl
 
-  const phoneNumber = process.env.ASTRO_WHATSAPP_NUMBER?.replace(/[^\d]/g, '')
+  const phoneNumber = normalizeWhatsAppPhone(process.env.ASTRO_WHATSAPP_NUMBER)
   const message = encodeURIComponent(
     process.env.ASTRO_WHATSAPP_MESSAGE?.trim() ||
+      process.env.ASTRO_WHATSAPP_JOIN_CODE?.trim() ||
       'connect astro code whatsapp agent',
   )
 
   if (phoneNumber) return `https://wa.me/${phoneNumber}?text=${message}`
   return `https://wa.me/?text=${message}`
+}
+
+function normalizeWhatsAppUrl(value: string | undefined): string | null {
+  const raw = value?.trim()
+  if (!raw) return null
+  if (raw.startsWith('whatsapp:')) {
+    const phoneNumber = normalizeWhatsAppPhone(raw)
+    return phoneNumber ? `https://wa.me/${phoneNumber}` : null
+  }
+  if (/^\+?\d[\d\s().-]+$/.test(raw)) {
+    const phoneNumber = normalizeWhatsAppPhone(raw)
+    return phoneNumber ? `https://wa.me/${phoneNumber}` : null
+  }
+  return raw
+}
+
+function normalizeWhatsAppPhone(value: string | undefined): string {
+  return value?.replace(/[^\d]/g, '') || ''
 }
 
 async function handleRequest(

@@ -24,7 +24,9 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
       const info = await ensureWhatsAppServer()
       const qr = await qrToString(info.whatsappUrl, {
         type: 'utf8',
-        errorCorrectionLevel: 'L',
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        small: true,
       })
       setWebhookUrl(info.webhookUrl)
       setPublicWebhookUrl(info.publicWebhookUrl)
@@ -90,7 +92,7 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
           For Twilio WhatsApp, set "When a message comes in" to this webhook URL.
         </Text>
         <Text dimColor>Set ASTRO_WHATSAPP_PUBLIC_URL when using ngrok/cloudflared.</Text>
-        <Text dimColor>{whatsappUrl}</Text>
+        <Text dimColor>QR opens: {whatsappUrl}</Text>
         <Text dimColor>Press q or esc to close.</Text>
       </Box>
     </Pane>
