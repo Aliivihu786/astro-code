@@ -1,49 +1,44 @@
 import { toString as qrToString } from 'qrcode'
 import * as React from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Pane } from '../../components/design-system/Pane.js'
 import type { KeyboardEvent } from '../../ink/events/keyboard-event.js'
 import { Box, Text } from '../../ink.js'
 import { useKeybinding } from '../../keybindings/useKeybinding.js'
+import { ensureWhatsAppServer } from '../../services/whatsapp/server.js'
 import type { LocalJSXCommandOnDone } from '../../types/command.js'
 
 type Props = {
   onDone: () => void
 }
 
-const DEFAULT_WHATSAPP_MESSAGE =
-  'Connect Astro Code to WhatsApp so I can continue this agent chat from my phone.'
-
-function getWhatsAppConnectUrl(): string {
-  const configuredUrl = process.env.ASTRO_WHATSAPP_URL?.trim()
-  if (configuredUrl) return configuredUrl
-
-  const phoneNumber = process.env.ASTRO_WHATSAPP_NUMBER?.replace(/[^\d]/g, '')
-  const message = encodeURIComponent(
-    process.env.ASTRO_WHATSAPP_MESSAGE?.trim() || DEFAULT_WHATSAPP_MESSAGE,
-  )
-
-  if (phoneNumber) return `https://wa.me/${phoneNumber}?text=${message}`
-  return `https://wa.me/?text=${message}`
-}
-
 function MobileQRCode({ onDone }: Props): React.ReactNode {
   const [qrCode, setQrCode] = useState('')
-  const whatsappUrl = useMemo(getWhatsAppConnectUrl, [])
+  const [status, setStatus] = useState('Starting WhatsApp webhook...')
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [publicWebhookUrl, setPublicWebhookUrl] = useState('')
+  const [whatsappUrl, setWhatsappUrl] = useState('')
 
   useEffect(() => {
-    async function generateQRCode(): Promise<void> {
-      const qr = await qrToString(whatsappUrl, {
+    async function startWhatsApp(): Promise<void> {
+      const info = await ensureWhatsAppServer()
+      const qr = await qrToString(info.whatsappUrl, {
         type: 'utf8',
         errorCorrectionLevel: 'L',
       })
+      setWebhookUrl(info.webhookUrl)
+      setPublicWebhookUrl(info.publicWebhookUrl)
+      setWhatsappUrl(info.whatsappUrl)
       setQrCode(qr)
+      setStatus('WhatsApp webhook is running.')
     }
 
-    generateQRCode().catch(() => {
+    startWhatsApp().catch(error => {
+      const message = error instanceof Error ? error.message : String(error)
       setQrCode('')
+      setStatus(`WhatsApp setup failed: ${message}`)
     })
-  }, [whatsappUrl])
+  }, [])
 
   const handleClose = useCallback(() => {
     onDone()
@@ -66,6 +61,7 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
         <Text bold color="green">
           Connect Astro Code to WhatsApp
         </Text>
+        <Text dimColor>{status}</Text>
         <Text dimColor>Scan this QR with your phone to open WhatsApp.</Text>
         <Text> </Text>
         {lines.length > 0 ? (
@@ -81,13 +77,19 @@ function MobileQRCode({ onDone }: Props): React.ReactNode {
           <Text bold>2.</Text> Send the prefilled connect message
         </Text>
         <Text>
-          <Text bold>3.</Text> Continue chatting with the agent from WhatsApp
+          <Text bold>3.</Text> Configure your WhatsApp provider webhook
+        </Text>
+        <Text>
+          <Text bold>4.</Text> Continue chatting with the agent from WhatsApp
         </Text>
         <Text> </Text>
         <Text dimColor>
-          Set ASTRO_WHATSAPP_URL or ASTRO_WHATSAPP_NUMBER to use your own
-          WhatsApp agent endpoint.
+          Webhook: {publicWebhookUrl || webhookUrl || 'starting...'}
         </Text>
+        <Text dimColor>
+          For Twilio WhatsApp, set "When a message comes in" to this webhook URL.
+        </Text>
+        <Text dimColor>Set ASTRO_WHATSAPP_PUBLIC_URL when using ngrok/cloudflared.</Text>
         <Text dimColor>{whatsappUrl}</Text>
         <Text dimColor>Press q or esc to close.</Text>
       </Box>

@@ -1,0 +1,192 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'http'
+import { loadProviderConfig } from '../../utils/providerSetup.js'
+
+type WhatsAppServerInfo = {
+  port: number
+  webhookUrl: string
+  publicWebhookUrl: string
+  whatsappUrl: string
+}
+
+let serverInfo: WhatsAppServerInfo | null = null
+
+const DEFAULT_PORT = 3987
+const DEFAULT_SYSTEM_PROMPT =
+  'You are Astro Code running inside WhatsApp. Answer clearly and concisely.'
+
+export async function ensureWhatsAppServer(): Promise<WhatsAppServerInfo> {
+  if (serverInfo) return serverInfo
+
+  const port = Number(process.env.ASTRO_WHATSAPP_PORT || DEFAULT_PORT)
+  const publicBaseUrl = process.env.ASTRO_WHATSAPP_PUBLIC_URL?.replace(/\/+$/, '')
+  const webhookUrl = `http://localhost:${port}/whatsapp/webhook`
+  const publicWebhookUrl = publicBaseUrl
+    ? `${publicBaseUrl}/whatsapp/webhook`
+    : webhookUrl
+  const whatsappUrl = getWhatsAppConnectUrl()
+
+  const server = createServer((req, res) => {
+    void handleRequest(req, res)
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '0.0.0.0', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+
+  serverInfo = {
+    port,
+    webhookUrl,
+    publicWebhookUrl,
+    whatsappUrl,
+  }
+  return serverInfo
+}
+
+export function getWhatsAppConnectUrl(): string {
+  const configuredUrl = process.env.ASTRO_WHATSAPP_URL?.trim()
+  if (configuredUrl) return configuredUrl
+
+  const phoneNumber = process.env.ASTRO_WHATSAPP_NUMBER?.replace(/[^\d]/g, '')
+  const message = encodeURIComponent(
+    process.env.ASTRO_WHATSAPP_MESSAGE?.trim() ||
+      'connect astro code whatsapp agent',
+  )
+
+  if (phoneNumber) return `https://wa.me/${phoneNumber}?text=${message}`
+  return `https://wa.me/?text=${message}`
+}
+
+async function handleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  try {
+    if (req.method === 'GET' && req.url === '/health') {
+      sendText(res, 200, 'ok')
+      return
+    }
+
+    if (req.method !== 'POST' || req.url !== '/whatsapp/webhook') {
+      sendText(res, 404, 'not found')
+      return
+    }
+
+    const body = await readBody(req)
+    const params = new URLSearchParams(body)
+    const prompt = params.get('Body')?.trim()
+
+    if (!prompt) {
+      sendTwiml(res, 'Send a message to chat with Astro Code.')
+      return
+    }
+
+    const reply = await askProvider(prompt)
+    sendTwiml(res, reply)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    sendTwiml(res, `Astro Code error: ${message}`)
+  }
+}
+
+async function askProvider(prompt: string): Promise<string> {
+  const config = (await loadProviderConfig()) || {
+    provider: process.env.AGENT_PROVIDER || 'other',
+    providerName: process.env.AGENT_PROVIDER_NAME || 'Provider',
+    baseUrl: process.env.AGENT_BASE_URL || process.env.ASTRO_BASE_URL || '',
+    model: process.env.AGENT_MODEL || process.env.ANTHROPIC_MODEL || '',
+    apiKey: process.env.AGENT_API_KEY || process.env.ASTRO_API_KEY,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+
+  if (!config.baseUrl) {
+    throw new Error('No provider base URL configured.')
+  }
+  if (!config.model) {
+    throw new Error('No provider model configured.')
+  }
+
+  const endpoint = getChatCompletionsUrl(config.baseUrl, config.provider)
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: getProviderHeaders(config.apiKey),
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        {
+          role: 'system',
+          content: process.env.ASTRO_WHATSAPP_SYSTEM_PROMPT || DEFAULT_SYSTEM_PROMPT,
+        },
+        { role: 'user', content: prompt },
+      ],
+      stream: false,
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 300)}`)
+  }
+
+  const json = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>
+  }
+  return (
+    json.choices?.[0]?.message?.content?.trim() ||
+    'Astro Code did not return a text response.'
+  )
+}
+
+function getChatCompletionsUrl(baseUrl: string, provider: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '')
+  if (provider === 'ollama' && !normalized.endsWith('/v1')) {
+    return `${normalized}/v1/chat/completions`
+  }
+  if (normalized.endsWith('/v1')) return `${normalized}/chat/completions`
+  return `${normalized}/v1/chat/completions`
+}
+
+function getProviderHeaders(apiKey: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey || 'local'}`,
+  }
+
+  if (process.env.AGENT_PROVIDER === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://agent-cli.local'
+    headers['X-Title'] = 'Astro Code WhatsApp'
+  }
+
+  return headers
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+function sendText(res: ServerResponse, status: number, body: string): void {
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' })
+  res.end(body)
+}
+
+function sendTwiml(res: ServerResponse, message: string): void {
+  res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' })
+  res.end(`<Response><Message>${escapeXml(message)}</Message></Response>`)
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
