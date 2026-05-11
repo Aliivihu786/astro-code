@@ -263,11 +263,15 @@ async function askProvider(prompt: string): Promise<string> {
   }
 
   const endpoint = getChatCompletionsUrl(config.baseUrl, config.provider)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 12000)
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: getProviderHeaders(config.apiKey),
+    signal: controller.signal,
     body: JSON.stringify({
       model: config.model,
+      max_tokens: 700,
       messages: [
         {
           role: 'system',
@@ -277,7 +281,7 @@ async function askProvider(prompt: string): Promise<string> {
       ],
       stream: false,
     }),
-  })
+  }).finally(() => clearTimeout(timeout))
 
   if (!response.ok) {
     const text = await response.text()
@@ -289,7 +293,7 @@ async function askProvider(prompt: string): Promise<string> {
   }
   return (
     json.choices?.[0]?.message?.content?.trim() ||
-    'Astro Code did not return a text response.'
+    `Astro Code did not return text from ${config.providerName} (${config.model}).`
   )
 }
 
@@ -297,6 +301,9 @@ function getChatCompletionsUrl(baseUrl: string, provider: string): string {
   const normalized = baseUrl.replace(/\/+$/, '')
   if (provider === 'ollama' && !normalized.endsWith('/v1')) {
     return `${normalized}/v1/chat/completions`
+  }
+  if (provider === 'google' || normalized.endsWith('/openai')) {
+    return `${normalized}/chat/completions`
   }
   if (normalized.endsWith('/v1')) return `${normalized}/chat/completions`
   return `${normalized}/v1/chat/completions`
