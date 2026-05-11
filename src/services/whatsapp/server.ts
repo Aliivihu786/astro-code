@@ -1,10 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import {
-  formatProviderModelChoices,
-  getAvailableProviderModels,
   getProviderModels,
   loadProviderConfig,
   setProviderModel,
+  type AgentProviderConfig,
   type ProviderId,
 } from '../../utils/providerSetup.js'
 
@@ -150,16 +149,15 @@ async function handleSlashCommand(input: string): Promise<string> {
 }
 
 async function handleModelCommand(args: string): Promise<string> {
+  const config = await loadProviderConfig()
   if (!args || args === 'list' || args === 'status' || args === 'current') {
-    return formatProviderModelChoices()
+    return formatWhatsAppModelChoices(config)
   }
 
-  const config = await loadProviderConfig()
   const provider = (config?.provider || process.env.AGENT_PROVIDER) as
     | ProviderId
     | undefined
-  const providerModels = await getAvailableProviderModels()
-  const staticProviderModels = getProviderModels(provider)
+  const providerModels = getWhatsAppProviderModels(config, provider)
   const requested = args.toLowerCase()
   const model = requested.startsWith('custom ')
     ? args.slice('custom '.length).trim()
@@ -170,13 +168,65 @@ async function handleModelCommand(args: string): Promise<string> {
   if (
     providerModels.includes(model) ||
     requested.startsWith('custom ') ||
-    staticProviderModels.length === 0
+    providerModels.length === 0
   ) {
     const nextModel = await setProviderModel(model)
     return `Model changed to ${nextModel}`
   }
 
-  return `Unknown model '${args}'.\n\n${await formatProviderModelChoices()}`
+  return `Unknown model '${args}'.\n\n${formatWhatsAppModelChoices(config)}`
+}
+
+function formatWhatsAppModelChoices(
+  config: AgentProviderConfig | null,
+): string {
+  const provider = (config?.provider || process.env.AGENT_PROVIDER) as
+    | ProviderId
+    | undefined
+  const providerName =
+    config?.providerName || process.env.AGENT_PROVIDER_NAME || provider
+  const currentModel =
+    config?.model || process.env.AGENT_MODEL || process.env.ANTHROPIC_MODEL
+  const models = getWhatsAppProviderModels(config, provider)
+
+  if (!provider || !providerName) {
+    return 'No provider configured. Restart Astro Code and complete provider setup.'
+  }
+
+  if (models.length === 0) {
+    return [
+      `Provider models for ${providerName}:`,
+      '* No saved model list for this provider.',
+      'Use /model custom <model> to switch.',
+    ].join('\n')
+  }
+
+  return [
+    `Provider models for ${providerName}:`,
+    ...models.map(model =>
+      model === currentModel ? `* ${model} (current)` : `  ${model}`,
+    ),
+    'Use /model <model> to switch. Use /model custom <model> for custom model.',
+  ].join('\n')
+}
+
+function getWhatsAppProviderModels(
+  config: AgentProviderConfig | null,
+  provider: ProviderId | undefined,
+): string[] {
+  const staticModels = getProviderModels(provider)
+  const currentModel =
+    config?.model || process.env.AGENT_MODEL || process.env.ANTHROPIC_MODEL
+  return uniqueStrings([
+    ...staticModels,
+    ...(currentModel && staticModels.includes(currentModel)
+      ? [currentModel]
+      : []),
+  ])
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map(value => value.trim()).filter(Boolean))]
 }
 
 async function handleStatusCommand(): Promise<string> {
