@@ -1,0 +1,55 @@
+{
+  "version": "2.1.136",
+  "commit": "c994458324acde64d1b38228895f4a5e5da30841",
+  "buildDate": "2026-05-08T08:03:58Z",
+  "platforms": {
+    "darwin-arm64": {
+      "binary": "astro.zst",
+      "checksum": "ffd452e98489053d2939d8d1cd901c245a6742726dde63d76668fe566dff55b7",
+      "size": 42523820,
+      "bundle": {
+        "checksum": "3a9104448542669d1a195e8ab2e18d74316d4e40673f893aa30d546ef798fb41",
+        "size": 42529437
+      }
+    },
+    "darwin-x64": {
+      "binary": "astro.zst",
+      "checksum": "7d3c0c5ba5416d228095fcccc229ab5483c427701dbdd2f6dc4919fa3db0c258",
+      "size": 44424159,
+      "bundle": {
+        "checksum": "a7ed4c043b3465d9e4c1876e74e59e25e64e728d3757810d2027a7688c1a66bb",
+        "size": 44429076
+      }
+    },
+    "linux-arm64": {
+      "binary": "astro.zst",
+      "checksum": "3ad66aa634cd5121f863b4a22f2d59cc1278c7b18e5f09c40aa5253ebcb38d11",
+      "size": 50314814
+    },
+    "linux-x64": {
+      "binary": "astro.zst",
+      "checksum": "0e10b4f2cc8c65cd6f1a60293310ca56919aa37de814deee8cca8acb9ba22c43",
+      "size": 50900470
+    },
+    "linux-arm64-musl": {
+      "binary": "astro.zst",
+      "checksum": "68808f35279240707fd8566763566e3abc74ed2af6e5efa193a7c446e2c5e936",
+      "size": 48917025
+    },
+    "linux-x64-musl": {
+      "binary": "astro.zst",
+      "checksum": "75989f8a4d821134ff559f241c213ea48e43431731b9754d084a71127cceab0f",
+      "size": 49654508
+    },
+    "win32-x64": {
+      "binary": "astro.exe.zst",
+      "checksum": "7aed7752f725e9cdb79f2aef6c78df5a6988d990ef3a7a8fd382237f4059e356",
+      "size": 51638133
+    },
+    "win32-arm64": {
+      "binary": "astro.exe.zst",
+      "checksum": "5b427e3947dfc921e809dd3d7402d2151c0812d5e506ca5b41fabbeabfb6ed5c",
+      "size": 49921016
+    }
+  }
+}

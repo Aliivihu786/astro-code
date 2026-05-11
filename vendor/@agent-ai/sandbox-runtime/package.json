@@ -1,0 +1,7 @@
+{
+  "name": "@agent-ai/sandbox-runtime",
+  "version": "0.0.0-local-stub",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts"
+}
