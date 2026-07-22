@@ -296,6 +296,8 @@ node_modules/
 ```
 
 Rotate any token pasted into terminal logs or chat.
-
+## Burn buld fix
+```bun buld
 $env:BUN_EXE = "$env:USERPROFILE\.bun\bin\bun.exe"
 node .\scripts\build.mjs
+```
